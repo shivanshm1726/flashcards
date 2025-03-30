@@ -1,0 +1,32 @@
+@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.preserve-3d {
+    transform-style: preserve-3d;
+}
+
+.backface-hidden {
+    backface-visibility: hidden;
+}
+
+.rotate-y-180 {
+    transform: rotateY(180deg);
+}
+
+.rotate-y-0 {
+    transform: rotateY(0deg);
+}
+
+.btn-primary {
+  @apply bg-blue-500 text-white px-4 py-2 rounded hover:bg-blue-600;
+}
+
+.btn-secondary {
+  @apply bg-gray-500 text-white px-4 py-2 rounded hover:bg-gray-600;
+}
+
+.btn-danger {
+  @apply bg-red-500 text-white px-4 py-2 rounded hover:bg-red-600;
+}

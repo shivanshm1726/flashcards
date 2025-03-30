@@ -1,0 +1,273 @@
+<?php
+session_start();
+
+if (!isset($_SESSION['user_id'])) {
+  header("Location: login.php");
+  exit();
+}
+
+include '../includes/db.php';
+
+$language = $_SESSION['language'] ?? 'en';
+$lang = require __DIR__ . "/../lang/$language.php";
+
+$user_id = $_SESSION['user_id'];
+$username = $_SESSION['username'];
+
+// Fetch a random motivational message
+$stmt = $pdo->prepare("SELECT message FROM motivational_messages ORDER BY RAND() LIMIT 1");
+$stmt->execute();
+$motivational_message = $stmt->fetchColumn();
+
+// Fetch the user's current study goal
+$stmt = $pdo->prepare("SELECT id, target_decks, period, created_at FROM study_goals WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
+$stmt->execute([$user_id]);
+$study_goal = $stmt->fetch();
+
+$progress = 0;
+$mastered_titles = [];
+$goal_completed = false;
+
+if ($study_goal && $study_goal['target_decks'] > 0) {
+  $stmt = $pdo->prepare("
+    SELECT COUNT(*) 
+    FROM decks d
+    LEFT JOIN shared_decks sd ON d.id = sd.deck_id AND sd.shared_with = ?
+    WHERE (d.user_id = ? OR sd.shared_with = ?) AND d.is_mastered = 1
+  ");
+  $stmt->execute([$user_id, $user_id, $user_id]);
+  $progress = $stmt->fetchColumn();
+
+  $stmt = $pdo->prepare("
+    SELECT d.title 
+    FROM decks d
+    LEFT JOIN shared_decks sd ON d.id = sd.deck_id AND sd.shared_with = ?
+    WHERE (d.user_id = ? OR sd.shared_with = ?) AND d.is_mastered = 1
+  ");
+  $stmt->execute([$user_id, $user_id, $user_id]);
+  $mastered_decks = $stmt->fetchAll();
+  $mastered_titles = array_column($mastered_decks, 'title');
+
+  if ($progress >= $study_goal['target_decks']) {
+    $goal_completed = true;
+    $stmt = $pdo->prepare("INSERT INTO study_goal_history (user_id, target_decks, period, completed_at) VALUES (?, ?, ?, NOW())");
+    $stmt->execute([$user_id, $study_goal['target_decks'], $study_goal['period']]);
+    $stmt = $pdo->prepare("
+      UPDATE decks d
+      LEFT JOIN shared_decks sd ON d.id = sd.deck_id AND sd.shared_with = ?
+      SET d.is_mastered = 0
+      WHERE (d.user_id = ? OR sd.shared_with = ?) AND d.is_mastered = 1
+    ");
+    $stmt->execute([$user_id, $user_id, $user_id]);
+    $stmt = $pdo->prepare("DELETE FROM study_goals WHERE id = ? AND user_id = ?");
+    $stmt->execute([$study_goal['id'], $user_id]);
+    $stmt = $pdo->prepare("SELECT id, target_decks, period, created_at FROM study_goals WHERE user_id = ? ORDER BY created_at DESC LIMIT 1");
+    $stmt->execute([$user_id]);
+    $study_goal = $stmt->fetch();
+    $progress = 0;
+    $mastered_titles = [];
+  }
+}
+
+// Fetch recently studied decks
+$stmt = $pdo->prepare("
+  SELECT d.*, COUNT(f.id) AS total_flashcards
+  FROM decks d
+  LEFT JOIN flashcards f ON d.id = f.deck_id
+  WHERE d.user_id = ? AND d.is_mastered = 0 AND d.last_studied_at IS NOT NULL
+  GROUP BY d.id
+  ORDER BY d.last_studied_at DESC
+  LIMIT 4
+");
+$stmt->execute([$user_id]);
+$decks_to_review = $stmt->fetchAll();
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard</title>
+  <link href="../src/output.css" rel="stylesheet">
+  <style>
+    .btn-primary {
+      @apply bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition duration-300;
+    }
+  </style>
+  <!-- Include GSAP and ScrollTrigger from CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.5/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.5/ScrollTrigger.min.js"></script>
+</head>
+<body class="bg-gray-50 min-h-screen font-sans">
+  <!-- Header (static) -->
+  <header class="bg-gradient-to-r from-blue-600 to-blue-800 text-white p-6 shadow-lg">
+    <div class="max-w-6xl mx-auto flex justify-between items-center">
+      <h1 class="text-3xl font-bold tracking-wide">Welcome back, <?php echo htmlspecialchars($username); ?>!</h1>
+      <div class="flex items-center space-x-6">
+        <form method="GET" action="search.php" class="flex items-center">
+          <input type="text" name="q" placeholder="Search flashcards..." class="px-4 py-2 border border-gray-300 rounded-l-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300">
+          <button type="submit" class="bg-blue-700 text-white px-4 py-2 rounded-r-md hover:bg-blue-800 transition duration-300">Search</button>
+        </form>
+        <a href="profile.php" class="text-sm text-white hover:underline transition duration-300">Profile</a>
+        <a href="logout.php" class="text-sm text-white hover:underline transition duration-300">Logout</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="p-6">
+    <div class="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+      <!-- Motivational Message -->
+      <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 animated-section">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Motivational Message</h2>
+        <p class="text-gray-600 italic text-lg"><?php echo htmlspecialchars($motivational_message); ?></p>
+      </div>
+
+      <!-- Study Goal -->
+      <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 animated-section">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Study Goal</h2>
+        <?php if ($study_goal && $study_goal['target_decks'] > 0 && !$goal_completed): ?>
+          <p class="text-gray-600">Target: <?php echo $study_goal['target_decks']; ?> decks to master <?php echo $study_goal['period'] === 'daily' ? 'today' : 'this week'; ?></p>
+          <p class="text-gray-600">Progress: <?php echo $progress; ?>/<?php echo $study_goal['target_decks']; ?> decks</p>
+          <p class="text-gray-500 text-sm">Mastered Decks: <?php echo implode(', ', $mastered_titles) ?: 'None'; ?></p>
+          <p class="text-gray-500 text-sm mt-1">Note: Progress updates when you mark a deck as mastered.</p>
+          <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+            <div class="bg-blue-600 h-2.5 rounded-full transition-all duration-500" style="width: <?php echo $study_goal['target_decks'] > 0 ? min(($progress / $study_goal['target_decks']) * 100, 100) : 0; ?>%"></div>
+          </div>
+        <?php else: ?>
+          <?php if ($goal_completed): ?>
+            <p class="text-green-500 font-semibold mb-4">Congratulations! You've completed your study goal!</p>
+            <p class="text-gray-600 mb-4">Please set a new goal to continue.</p>
+          <?php else: ?>
+            <p class="text-gray-600 mb-4">No study goal set.</p>
+          <?php endif; ?>
+          <form action="set_study_goal.php" method="POST" class="space-y-4">
+            <div>
+              <label for="target_decks" class="block text-sm font-medium text-gray-700">Target Decks to Master</label>
+              <input type="number" id="target_decks" name="target_decks" min="1" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300" required>
+            </div>
+            <div>
+              <label for="period" class="block text-sm font-medium text-gray-700">Period</label>
+              <select id="period" name="period" class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-300">
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+              </select>
+            </div>
+            <button type="submit" class="btn-primary">Set Goal</button>
+          </form>
+        <?php endif; ?>
+        <h3 class="text-lg font-semibold mt-6 mb-2 text-gray-800">Goal History</h3>
+        <?php
+        $stmt = $pdo->prepare("SELECT target_decks, period, completed_at FROM study_goal_history WHERE user_id = ? ORDER BY completed_at DESC LIMIT 5");
+        $stmt->execute([$user_id]);
+        $goal_history = $stmt->fetchAll();
+        ?>
+        <?php if (empty($goal_history)): ?>
+          <p class="text-gray-600">No completed goals yet.</p>
+        <?php else: ?>
+          <ul class="list-disc list-inside text-gray-600">
+            <?php foreach ($goal_history as $goal): ?>
+              <li>Mastered <?php echo $goal['target_decks']; ?> decks (<?php echo $goal['period']; ?>) on <?php echo date('F j, Y, g:i a', strtotime($goal['completed_at'])); ?></li>
+            <?php endforeach; ?>
+          </ul>
+        <?php endif; ?>
+      </div>
+
+      <!-- Decks to Review -->
+      <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 md:col-span-2 animated-section">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Decks to Review</h2>
+        <?php if (empty($decks_to_review)): ?>
+          <p class="text-gray-600">No recently studied decks available. Start studying to see decks here!</p>
+        <?php else: ?>
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+            <?php foreach ($decks_to_review as $deck): ?>
+              <div class="bg-white p-4 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 border border-gray-200 animated-card">
+                <h3 class="text-lg font-semibold text-gray-800 mb-2"><?php echo htmlspecialchars($deck['title']); ?></h3>
+                <p class="text-gray-600 text-sm mb-4 line-clamp-2"><?php echo htmlspecialchars($deck['description']); ?></p>
+                <p class="text-sm text-gray-500">Flashcards: <?php echo $deck['total_flashcards']; ?></p>
+                <p class="text-sm text-gray-500 mt-1">Last Studied: <?php echo date('F j, Y', strtotime($deck['last_studied_at'])); ?></p>
+                <div class="mt-4">
+                  <a href="study.php?deck_id=<?php echo $deck['id']; ?>" class="btn-primary">Study</a>
+                </div>
+              </div>
+            <?php endforeach; ?>
+          </div>
+        <?php endif; ?>
+      </div>
+
+      <!-- Quick Actions -->
+      <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 animated-section">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">Quick Actions</h2>
+        <div class="flex flex-wrap gap-4">
+          <a href="create_deck.php" class="btn-primary">Create Deck</a>
+          <a href="view_decks.php" class="btn-primary">Study Now</a>
+          <a href="custom_study_sessions.php" class="btn-primary">Custom Study</a>
+        </div>
+      </div>
+
+      <!-- View All Decks -->
+      <div class="bg-white p-6 rounded-lg shadow-md hover:shadow-lg transition-shadow duration-300 animated-section">
+        <h2 class="text-2xl font-semibold mb-4 text-gray-800">View All Decks</h2>
+        <p class="text-gray-600 mb-4">Explore all your decks and start studying.</p>
+        <a href="view_decks.php" class="btn-primary">View Decks</a>
+      </div>
+    </div>
+  </main>
+
+  <!-- GSAP ScrollTrigger Animations -->
+  <script>
+    gsap.registerPlugin(ScrollTrigger);
+
+    // Animate each section as it scrolls into view (once only)
+    gsap.utils.toArray('.animated-section').forEach(section => {
+      gsap.from(section, {
+        scrollTrigger: {
+          trigger: section,
+          start: "top 80%",
+          toggleActions: "play none none none",
+          once: true
+        },
+        duration: 1,
+        y: 50,
+        opacity: 0,
+        ease: "power2.out",
+        immediateRender: false
+      });
+    });
+
+    // Animate individual review cards as they scroll into view (once only)
+    gsap.utils.toArray('.animated-card').forEach(card => {
+      gsap.from(card, {
+        scrollTrigger: {
+          trigger: card,
+          start: "top 85%",
+          toggleActions: "play none none none",
+          once: true
+        },
+        duration: 0.8,
+        y: 20,
+        opacity: 0,
+        ease: "power2.out",
+        immediateRender: false
+      });
+    });
+
+    // Animate primary buttons as they scroll into view (once only)
+    gsap.utils.toArray('.btn-primary').forEach(btn => {
+      gsap.from(btn, {
+        scrollTrigger: {
+          trigger: btn,
+          start: "top 90%",
+          toggleActions: "play none none none",
+          once: true
+        },
+        duration: 0.8,
+        scale: 0,
+        opacity: 0,
+        ease: "back.out(1.7)",
+        immediateRender: false
+      });
+    });
+  </script>
+</body>
+</html>
