@@ -46,6 +46,7 @@ $stmt->execute([$deck_id]);
 // Clear the current index for this deck
 unset($_SESSION['current_index'][$session_id][$deck_id]);
 
-header("Location: study_custom_session.php?session_id=$session_id");
+// Add cache-busting parameter to force fresh load
+header("Location: study_custom_session.php?session_id=$session_id&t=" . time());
 exit();
 ?>
