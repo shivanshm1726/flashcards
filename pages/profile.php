@@ -96,6 +96,21 @@ try {
     $study_data = [];
 }
 
+// Fetch user's decks
+try {
+    $stmt = $pdo->prepare("
+        SELECT id, title, description 
+        FROM decks 
+        WHERE user_id = ? 
+        ORDER BY created_at DESC
+    ");
+    $stmt->execute([$user_id]);
+    $decks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    error_log("Error fetching decks: " . $e->getMessage());
+    $decks = [];
+}
+
 // Prepare labels and data points for the graph
 $labels = [];
 $data_points = [];
@@ -105,6 +120,37 @@ for ($i = 0; $i < 7; $i++) {
     $labels[] = $current_date->format('D, M j');
     $data_points[] = $study_data[$date_str] ?? 0;
     $current_date->modify('+1 day');
+}
+
+// Fetch categories for the filter
+try {
+    $stmt = $pdo->prepare("SELECT id, name FROM categories ORDER BY name ASC");
+    $stmt->execute();
+    $categories = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    error_log("Error fetching categories: " . $e->getMessage());
+    $categories = [];
+}
+
+// Fetch user's decks with category filter
+$selected_category = $_GET['category'] ?? '';
+$decks_query = "SELECT id, title, description FROM decks WHERE user_id = ? ";
+$params = [$user_id];
+
+if ($selected_category !== '') {
+    $decks_query .= "AND category_id = ? ";
+    $params[] = $selected_category;
+}
+
+$decks_query .= "ORDER BY created_at DESC";
+
+try {
+    $stmt = $pdo->prepare($decks_query);
+    $stmt->execute($params);
+    $decks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    error_log("Error fetching decks: " . $e->getMessage());
+    $decks = [];
 }
 
 // Handle form submissions
@@ -180,7 +226,7 @@ $section = $_GET['section'] ?? 'stats';
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Profile</title>
     <link href="../src/output.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
+    <link href "https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.11.5/gsap.min.js" defer></script>
@@ -203,16 +249,111 @@ $section = $_GET['section'] ?? 'stats';
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 0.5rem;
-            transition: background 0.3s ease;
+            transition: background 0.3s ease, transform 0.3s ease;
             display: inline-block;
         }
 
         .btn-primary:hover {
             background: #7c3aed;
+            transform: translateY(-2px);
         }
 
         .btn-secondary {
             @apply text-blue-600 hover:text-blue-800 transition-all duration-300;
+        }
+
+        .btn-action {
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            transition: background 0.3s ease, transform 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .filter-bar {
+            background: linear-gradient(120deg, #3b82f6, #8b5cf6);
+            border-radius: 12px;
+            padding: 1rem;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            margin-bottom: 1.5rem;
+        }
+
+        .filter-bar label {
+            color: white;
+            font-weight: 500;
+            margin-right: 1rem;
+        }
+
+        .filter-bar select {
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            border: 1px solid #e5e7eb;
+            background: white;
+            color: #374151;
+            font-size: 0.875rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .filter-bar select:focus {
+            outline: none;
+            border-color: #8b5cf6;
+            box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+        }
+
+        .deck-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            padding: 1.5rem 1.5rem 2rem 1.5rem;
+            /* Increased bottom padding */
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .deck-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+        }
+
+        .btn-action {
+            padding: 0.4rem 0.8rem;
+            /* Reduced padding for compactness */
+            border-radius: 0.5rem;
+            transition: background 0.3s ease, transform 0.3s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .btn-edit {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .btn-edit:hover {
+            background: #2563eb;
+            transform: translateY(-2px);
+        }
+
+        .btn-add {
+            background: #10b981;
+            color: white;
+        }
+
+        .btn-add:hover {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .btn-delete {
+            background: #ef4444;
+            color: white;
+        }
+
+        .btn-delete:hover {
+            background: #dc2626;
+            transform: translateY(-2px);
         }
 
         .sidebar {
@@ -269,8 +410,17 @@ $section = $_GET['section'] ?? 'stats';
             box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
         }
 
-        .form-input {
-            @apply mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500;
+        .deck-card {
+            background: rgba(255, 255, 255, 0.9);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .deck-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
         }
 
         .calendar-day-label {
@@ -323,6 +473,9 @@ $section = $_GET['section'] ?? 'stats';
                 <nav>
                     <a href="profile.php?section=stats" class="<?php echo $section === 'stats' ? 'active' : ''; ?>">
                         <i class="fas fa-chart-bar mr-2"></i> Stats
+                    </a>
+                    <a href="profile.php?section=decks" class="<?php echo $section === 'decks' ? 'active' : ''; ?>">
+                        <i class="fas fa-layer-group mr-2"></i> My Decks
                     </a>
                     <a href="profile.php?section=personal" class="<?php echo $section === 'personal' ? 'active' : ''; ?>">
                         <i class="fas fa-user mr-2"></i> Personal Info
@@ -502,6 +655,46 @@ $section = $_GET['section'] ?? 'stats';
                             <?php endif; ?>
                             <button type="submit" name="update_language" class="btn-primary">Update Language</button>
                         </form>
+                    </div>
+                <?php elseif ($section === 'decks'): ?>
+                    <!-- My Decks -->
+                    <div class="bg-white p-6 rounded-lg shadow-md animated-section">
+                        <h2 class="text-2xl font-semibold text-gray-800 mb-6">My Decks</h2>
+                        <!-- Category Filter -->
+                        <div class="filter-bar flex items-center">
+                            <label for="category-filter"><i class="fas fa-filter mr-2"></i> Filter by Category:</label>
+                            <select id="category-filter" onchange="location = this.value;" class="w-48">
+                                <option value="profile.php?section=decks" <?php echo $selected_category === '' ? 'selected' : ''; ?>>All Categories</option>
+                                <?php foreach ($categories as $category): ?>
+                                    <option value="profile.php?section=decks&category=<?php echo $category['id']; ?>" <?php echo $selected_category == $category['id'] ? 'selected' : ''; ?>>
+                                        <?php echo htmlspecialchars($category['name']); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <?php if (empty($decks)): ?>
+                            <p class="text-gray-600">You haven't created any decks yet. <a href="create_deck.php" class="text-blue-600 hover:underline">Create one now!</a></p>
+                        <?php else: ?>
+                            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <?php foreach ($decks as $deck): ?>
+                                    <div class="deck-card">
+                                        <h3 class="text-lg font-semibold text-gray-800 mb-2"><?php echo htmlspecialchars($deck['title']); ?></h3>
+                                        <p class="text-gray-600 text-sm mb-4"><?php echo htmlspecialchars($deck['description'] ?: 'No description'); ?></p>
+                                        <div class="flex flex-wrap gap-2">
+                                            <a href="edit_deck.php?deck_id=<?php echo $deck['id']; ?>" class="btn-action btn-edit">
+                                                <i class="fas fa-edit"></i> Edit
+                                            </a>
+                                            <a href="add_flashcards.php?deck_id=<?php echo $deck['id']; ?>" class="btn-action btn-add">
+                                                <i class="fas fa-plus"></i> Add Flashcards
+                                            </a>
+                                            <a href="delete_deck.php?deck_id=<?php echo $deck['id']; ?>" class="btn-action btn-delete" onclick="return confirm('Are you sure you want to delete this deck? This action cannot be undone.');">
+                                                <i class="fas fa-trash"></i> Delete
+                                            </a>
+                                        </div>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
                     </div>
                 <?php endif; ?>
             </div>
