@@ -344,7 +344,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 🙏 Acknowledgments
 
-- 💡 Inspired by Anki and Quizlet
 - 🎨 UI components from TailwindCSS
 - 📧 Email functionality via PHPMailer
 - 🧠 Spaced repetition algorithm research
@@ -355,7 +354,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ### 🌟 Star this repository if you found it helpful!
 
-**Made with ❤️ by [Your Name]**
+**Made with ❤️ by Shivansh**
 
 [⬆ Back to Top](#-flashcards-app)
 
